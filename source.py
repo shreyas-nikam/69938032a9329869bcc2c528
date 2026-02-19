@@ -4,9 +4,76 @@ from sklearn.linear_model import LinearRegression
 import xgboost as xgb
 import shap
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick # For percentage formatting
+import matplotlib.ticker as mtick  # For percentage formatting
+import pickle
+import os
+
+# --- Persistence Functions ---
+
+
+def save_data(df: pd.DataFrame, feature_cols: list[str], filepath: str = 'saved_data.pkl'):
+    """Save generated data to disk."""
+    with open(filepath, 'wb') as f:
+        pickle.dump({'df': df, 'feature_cols': feature_cols}, f)
+    print(f"Data saved to {filepath}")
+
+
+def load_data(filepath: str = 'saved_data.pkl') -> tuple[pd.DataFrame, list[str]] | None:
+    """Load generated data from disk."""
+    if os.path.exists(filepath):
+        with open(filepath, 'rb') as f:
+            data = pickle.load(f)
+        print(f"Data loaded from {filepath}")
+        return data['df'], data['feature_cols']
+    return None
+
+
+def save_backtest_results(linear_results: pd.DataFrame, ml_results: pd.DataFrame,
+                          filepath: str = 'saved_backtest_results.pkl'):
+    """Save backtest results to disk."""
+    with open(filepath, 'wb') as f:
+        pickle.dump({'linear_results': linear_results,
+                    'ml_results': ml_results}, f)
+    print(f"Backtest results saved to {filepath}")
+
+
+def load_backtest_results(filepath: str = 'saved_backtest_results.pkl') -> tuple[pd.DataFrame, pd.DataFrame] | None:
+    """Load backtest results from disk."""
+    if os.path.exists(filepath):
+        with open(filepath, 'rb') as f:
+            data = pickle.load(f)
+        print(f"Backtest results loaded from {filepath}")
+        return data['linear_results'], data['ml_results']
+    return None
+
+
+def save_shap_data(importance: pd.Series, shap_values: np.ndarray,
+                   shap_sample_data: pd.DataFrame, ml_model,
+                   filepath: str = 'saved_shap_data.pkl'):
+    """Save SHAP analysis data to disk."""
+    with open(filepath, 'wb') as f:
+        pickle.dump({
+            'importance': importance,
+            'shap_values': shap_values,
+            'shap_sample_data': shap_sample_data,
+            'ml_model': ml_model
+        }, f)
+    print(f"SHAP data saved to {filepath}")
+
+
+def load_shap_data(filepath: str = 'saved_shap_data.pkl') -> tuple | None:
+    """Load SHAP analysis data from disk."""
+    if os.path.exists(filepath):
+        with open(filepath, 'rb') as f:
+            data = pickle.load(f)
+        print(f"SHAP data loaded from {filepath}")
+        return (data['importance'], data['shap_values'],
+                data['shap_sample_data'], data['ml_model'])
+    return None
 
 # --- Data Generation ---
+
+
 def generate_synthetic_data(n_stocks: int, n_months: int, seed: int = 42) -> tuple[pd.DataFrame, list[str]]:
     """
     Generates synthetic panel data for stock selection.
@@ -34,14 +101,14 @@ def generate_synthetic_data(n_stocks: int, n_months: int, seed: int = 42) -> tup
             earnings_growth = np.random.randn()
 
             # Technical factors
-            momentum_12m = np.random.randn() # 12-month momentum
+            momentum_12m = np.random.randn()  # 12-month momentum
             momentum_1m = np.random.randn()  # Short-term reversal
-            volatility = np.abs(np.random.randn()) * 0.3 # Volatility
+            volatility = np.abs(np.random.randn()) * 0.3  # Volatility
 
             # Alternative / sentiment
             analyst_revisions = np.random.randn()
-            log_mcap = np.random.randn() + 10 # Size (log market cap)
-            short_interest = np.abs(np.random.randn()) * 0.1 # Short interest
+            log_mcap = np.random.randn() + 10  # Size (log market cap)
+            short_interest = np.abs(np.random.randn()) * 0.1  # Short interest
 
             # True return: linear + nonlinear + noise
             # Value: low P/E -> higher return (linear component)
@@ -56,7 +123,7 @@ def generate_synthetic_data(n_stocks: int, n_months: int, seed: int = 42) -> tup
                   (0.001 * earnings_growth) + \
                   (0.001 * momentum_1m) + \
                   (0.001 * short_interest) + \
-                  (np.random.randn() * 0.06) # Noise (dominates)
+                  (np.random.randn() * 0.06)  # Noise (dominates)
 
             records.append({
                 'month': month, 'stock_id': stock_id,
@@ -77,6 +144,8 @@ def generate_synthetic_data(n_stocks: int, n_months: int, seed: int = 42) -> tup
     return df, feature_cols
 
 # --- Prediction Models ---
+
+
 def linear_predict(train_df: pd.DataFrame, test_df: pd.DataFrame, features: list[str], target: str = 'next_month_return') -> tuple[np.ndarray, LinearRegression]:
     """
     Performs Simple OLS cross-sectional regression for return prediction.
@@ -96,6 +165,7 @@ def linear_predict(train_df: pd.DataFrame, test_df: pd.DataFrame, features: list
     model.fit(train_df[features], train_df[target])
     predictions = model.predict(test_df[features])
     return predictions, model
+
 
 def ml_predict(train_df: pd.DataFrame, test_df: pd.DataFrame, features: list[str], target: str = 'next_month_return') -> tuple[np.ndarray, xgb.XGBRegressor]:
     """
@@ -120,13 +190,15 @@ def ml_predict(train_df: pd.DataFrame, test_df: pd.DataFrame, features: list[str
         subsample=0.8,          # Subsample ratio of the training instance
         colsample_bytree=0.8,   # Subsample ratio of columns when constructing each tree
         random_state=42,        # Random seed for reproducibility
-        objective='reg:squarederror' # Objective function for regression
+        objective='reg:squarederror'  # Objective function for regression
     )
     model.fit(train_df[features], train_df[target])
     predictions = model.predict(test_df[features])
     return predictions, model
 
 # --- Backtesting Framework ---
+
+
 def walk_forward_backtest(df: pd.DataFrame, features: list[str], predict_fn,
                           min_train_months: int = 60, rebalance_freq: int = 1) -> pd.DataFrame:
     """
@@ -148,8 +220,9 @@ def walk_forward_backtest(df: pd.DataFrame, features: list[str], predict_fn,
 
     # Ensure min_train_months is valid
     if min_train_months >= len(unique_months):
-        print(f"Warning: min_train_months ({min_train_months}) is greater than or equal to total unique_months ({len(unique_months)}). No backtest will be performed.")
-        return pd.DataFrame() # Return empty DataFrame if no backtest can be performed
+        print(
+            f"Warning: min_train_months ({min_train_months}) is greater than or equal to total unique_months ({len(unique_months)}). No backtest will be performed.")
+        return pd.DataFrame()  # Return empty DataFrame if no backtest can be performed
 
     # Iterate through months for backtesting
     # The loop starts after the initial training period
@@ -158,9 +231,10 @@ def walk_forward_backtest(df: pd.DataFrame, features: list[str], predict_fn,
         test_month = unique_months[i]
 
         train_data = df[df['month'].isin(train_months)]
-        test_data = df[df['month'] == test_month].copy() # Ensure a copy to avoid SettingWithCopyWarning
+        # Ensure a copy to avoid SettingWithCopyWarning
+        test_data = df[df['month'] == test_month].copy()
 
-        if len(test_data) < 50: # Skip if not enough stocks for robust quintile formation
+        if len(test_data) < 50:  # Skip if not enough stocks for robust quintile formation
             continue
 
         # Predict returns for the test month
@@ -178,10 +252,10 @@ def walk_forward_backtest(df: pd.DataFrame, features: list[str], predict_fn,
                 test_data['quintile'] = pd.qcut(
                     test_data['predicted_return'], num_quantiles, labels=labels, duplicates='drop'
                 )
-                long_quintile_label = labels[-1] # Highest quintile
-                short_quintile_label = labels[0] # Lowest quintile
+                long_quintile_label = labels[-1]  # Highest quintile
+                short_quintile_label = labels[0]  # Lowest quintile
             else:
-                test_data['quintile'] = np.nan # No quantiles can be formed
+                test_data['quintile'] = np.nan  # No quantiles can be formed
                 long_quintile_label = None
                 short_quintile_label = None
         else:
@@ -191,8 +265,10 @@ def walk_forward_backtest(df: pd.DataFrame, features: list[str], predict_fn,
             long_quintile_label = 5
             short_quintile_label = 1
 
-        long_ret = test_data[test_data['quintile'] == long_quintile_label]['next_month_return'].mean() if long_quintile_label else np.nan
-        short_ret = test_data[test_data['quintile'] == short_quintile_label]['next_month_return'].mean() if short_quintile_label else np.nan
+        long_ret = test_data[test_data['quintile'] == long_quintile_label]['next_month_return'].mean(
+        ) if long_quintile_label else np.nan
+        short_ret = test_data[test_data['quintile'] == short_quintile_label]['next_month_return'].mean(
+        ) if short_quintile_label else np.nan
 
         if pd.isna(long_ret):
             long_ret = 0.0
@@ -213,6 +289,8 @@ def walk_forward_backtest(df: pd.DataFrame, features: list[str], predict_fn,
     return pd.DataFrame(portfolio_returns)
 
 # --- Performance Metrics and Comparison ---
+
+
 def compute_metrics(results_df: pd.DataFrame, label: str) -> dict:
     """
     Computes standard financial performance metrics for a given strategy.
@@ -245,7 +323,8 @@ def compute_metrics(results_df: pd.DataFrame, label: str) -> dict:
     sharpe = (ann_return / ann_volatility) if ann_volatility != 0 else np.nan
     max_drawdown = drawdown.min()
     hit_rate = (rets > 0).mean()
-    total_return = cumulative_returns.iloc[-1] - 1 if not cumulative_returns.empty else 0.0
+    total_return = cumulative_returns.iloc[-1] - \
+        1 if not cumulative_returns.empty else 0.0
 
     return {
         'strategy': label,
@@ -256,6 +335,7 @@ def compute_metrics(results_df: pd.DataFrame, label: str) -> dict:
         'max_drawdown': max_drawdown,
         'total_return': total_return,
     }
+
 
 def compare_strategies(linear_results: pd.DataFrame, ml_results: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -277,19 +357,28 @@ def compare_strategies(linear_results: pd.DataFrame, ml_results: pd.DataFrame) -
 
     # Format the DataFrame for better readability
     comp_df_formatted = comp_df.copy()
-    comp_df_formatted['ann_return'] = comp_df_formatted['ann_return'].apply(lambda x: f"{x*100:.2f}%" if pd.notna(x) else "N/A")
-    comp_df_formatted['ann_volatility'] = comp_df_formatted['ann_volatility'].apply(lambda x: f"{x*100:.2f}%" if pd.notna(x) else "N/A")
-    comp_df_formatted['sharpe'] = comp_df_formatted['sharpe'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
-    comp_df_formatted['hit_rate'] = comp_df_formatted['hit_rate'].apply(lambda x: f"{x*100:.0f}%" if pd.notna(x) else "N/A")
-    comp_df_formatted['max_drawdown'] = comp_df_formatted['max_drawdown'].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "N/A")
-    comp_df_formatted['total_return'] = comp_df_formatted['total_return'].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "N/A")
+    comp_df_formatted['ann_return'] = comp_df_formatted['ann_return'].apply(
+        lambda x: f"{x*100:.2f}%" if pd.notna(x) else "N/A")
+    comp_df_formatted['ann_volatility'] = comp_df_formatted['ann_volatility'].apply(
+        lambda x: f"{x*100:.2f}%" if pd.notna(x) else "N/A")
+    comp_df_formatted['sharpe'] = comp_df_formatted['sharpe'].apply(
+        lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+    comp_df_formatted['hit_rate'] = comp_df_formatted['hit_rate'].apply(
+        lambda x: f"{x*100:.0f}%" if pd.notna(x) else "N/A")
+    comp_df_formatted['max_drawdown'] = comp_df_formatted['max_drawdown'].apply(
+        lambda x: f"{x*100:.1f}%" if pd.notna(x) else "N/A")
+    comp_df_formatted['total_return'] = comp_df_formatted['total_return'].apply(
+        lambda x: f"{x*100:.1f}%" if pd.notna(x) else "N/A")
 
-    return comp_df_formatted, comp_df # Return both formatted and unformatted for calculations
+    # Return both formatted and unformatted for calculations
+    return comp_df_formatted, comp_df
 
 # --- SHAP Analysis ---
+
+
 def perform_shap_analysis(df: pd.DataFrame, feature_cols: list[str],
                           min_train_months_for_shap: int = 60,
-                          shap_sample_size: int = 1000) -> tuple[pd.Series | None, np.ndarray | None, pd.DataFrame | None]:
+                          shap_sample_size: int = 1000) -> tuple:
     """
     Trains an XGBoost model and performs SHAP analysis on it.
 
@@ -302,38 +391,44 @@ def perform_shap_analysis(df: pd.DataFrame, feature_cols: list[str],
     Returns:
         tuple: (pd.Series) Feature importance based on mean absolute SHAP values,
                (np.ndarray) Raw SHAP values,
-               (pd.DataFrame) Data used for SHAP calculation.
-               Returns (None, None, None) if not enough training data.
+               (pd.DataFrame) Data used for SHAP calculation,
+               (xgb.XGBRegressor) The trained model.
+               Returns (None, None, None, None) if not enough training data.
     """
     train_all_for_shap = df[df['month'] < min_train_months_for_shap]
 
     if train_all_for_shap.empty:
         print("Warning: Not enough training data for SHAP analysis. Skipping SHAP.")
-        return None, None, None
-    
+        return None, None, None, None
+
     # Adjust sample size if training data is smaller than requested sample size
     effective_shap_sample_size = min(shap_sample_size, len(train_all_for_shap))
     if effective_shap_sample_size == 0:
         print("Warning: No samples available for SHAP analysis after filtering.")
-        return None, None, None
+        return None, None, None, None
 
-    shap_sample_data = train_all_for_shap[feature_cols].sample(effective_shap_sample_size, random_state=42)
+    shap_sample_data = train_all_for_shap[feature_cols].sample(
+        effective_shap_sample_size, random_state=42)
 
     ml_final_model_for_shap = xgb.XGBRegressor(
         n_estimators=100, max_depth=4, learning_rate=0.05,
         subsample=0.8, colsample_bytree=0.8, random_state=42,
         objective='reg:squarederror'
     )
-    ml_final_model_for_shap.fit(train_all_for_shap[feature_cols], train_all_for_shap['next_month_return'])
+    ml_final_model_for_shap.fit(
+        train_all_for_shap[feature_cols], train_all_for_shap['next_month_return'])
 
     explainer = shap.TreeExplainer(ml_final_model_for_shap)
     shap_values = explainer.shap_values(shap_sample_data)
 
-    importance = pd.Series(np.abs(shap_values).mean(axis=0), index=feature_cols).sort_values(ascending=False)
+    importance = pd.Series(np.abs(shap_values).mean(
+        axis=0), index=feature_cols).sort_values(ascending=False)
 
-    return importance, shap_values, shap_sample_data
+    return importance, shap_values, shap_sample_data, ml_final_model_for_shap
 
 # --- Governance Assessment ---
+
+
 def assess_governance(comparison_table_raw: pd.DataFrame) -> dict:
     """
     Assesses the justification for ML complexity based on Sharpe Ratio lift.
@@ -354,7 +449,8 @@ def assess_governance(comparison_table_raw: pd.DataFrame) -> dict:
     else:
         sharpe_lift = ml_sharpe - lin_sharpe
         # Avoid division by zero or very small numbers for relative lift
-        relative_sharpe_lift = (ml_sharpe / max(lin_sharpe, 0.01) - 1) * 100 if lin_sharpe != 0 else np.inf
+        relative_sharpe_lift = (
+            ml_sharpe / max(lin_sharpe, 0.01) - 1) * 100 if lin_sharpe != 0 else np.inf
 
         if sharpe_lift > 0.3:
             verdict = "Substantial alpha lift. ML complexity JUSTIFIED. Proceed with Tier 2 governance (validation + monitoring)."
@@ -372,6 +468,8 @@ def assess_governance(comparison_table_raw: pd.DataFrame) -> dict:
     }
 
 # --- Plotting Functions ---
+
+
 def plot_cumulative_returns(linear_results: pd.DataFrame, ml_results: pd.DataFrame, title: str = 'Cumulative Returns of Long-Short Strategies'):
     """
     Plots the cumulative returns of linear and ML strategies.
@@ -383,9 +481,11 @@ def plot_cumulative_returns(linear_results: pd.DataFrame, ml_results: pd.DataFra
     """
     plt.figure(figsize=(12, 6))
     if not linear_results.empty:
-        (1 + linear_results['ls_return']).cumprod().plot(label='Linear (OLS) Strategy', color='blue')
+        (1 + linear_results['ls_return']
+         ).cumprod().plot(label='Linear (OLS) Strategy', color='blue')
     if not ml_results.empty:
-        (1 + ml_results['ls_return']).cumprod().plot(label='ML (XGBoost) Strategy', color='green')
+        (1 + ml_results['ls_return']
+         ).cumprod().plot(label='ML (XGBoost) Strategy', color='green')
     plt.title(title)
     plt.xlabel('Months')
     plt.ylabel('Cumulative Return')
@@ -394,6 +494,7 @@ def plot_cumulative_returns(linear_results: pd.DataFrame, ml_results: pd.DataFra
     plt.legend()
     plt.tight_layout()
     plt.show()
+
 
 def plot_shap_summary(shap_values: np.ndarray, shap_sample_data: pd.DataFrame, title: str = 'SHAP Summary Plot for XGBoost Model'):
     """
@@ -454,14 +555,17 @@ def run_stock_selection_analysis(
 
     # 2. Run Backtests
     print("\nRunning walk-forward backtests for OLS and XGBoost strategies...")
-    linear_results = walk_forward_backtest(df, feature_cols, linear_predict, min_train_months, rebalance_freq)
-    ml_results = walk_forward_backtest(df, feature_cols, ml_predict, min_train_months, rebalance_freq)
+    linear_results = walk_forward_backtest(
+        df, feature_cols, linear_predict, min_train_months, rebalance_freq)
+    ml_results = walk_forward_backtest(
+        df, feature_cols, ml_predict, min_train_months, rebalance_freq)
 
     # 3. Compare Strategies
-    comparison_table_formatted, comparison_table_raw = compare_strategies(linear_results, ml_results)
+    comparison_table_formatted, comparison_table_raw = compare_strategies(
+        linear_results, ml_results)
 
     # 4. SHAP Analysis
-    shap_importance, shap_values, shap_data_for_plot = perform_shap_analysis(
+    shap_importance, shap_values, shap_data_for_plot, ml_final_model = perform_shap_analysis(
         df, feature_cols, min_train_months_for_shap=min_train_months, shap_sample_size=shap_sample_size
     )
 
@@ -478,8 +582,10 @@ def run_stock_selection_analysis(
         'shap_importance': shap_importance,
         'shap_values': shap_values,
         'shap_data_for_plot': shap_data_for_plot,
+        'ml_final_model': ml_final_model,
         'governance_assessment': governance_assessment
     }
+
 
 # --- Main Execution Block for standalone run ---
 if __name__ == "__main__":
@@ -488,7 +594,7 @@ if __name__ == "__main__":
     # Define parameters
     N_STOCKS = 200
     N_MONTHS = 120
-    MIN_TRAIN_MONTHS = 60 # 5 years for initial training
+    MIN_TRAIN_MONTHS = 60  # 5 years for initial training
     REBALANCE_FREQ = 1    # Monthly rebalancing
     RANDOM_SEED = 42
     SHAP_SAMPLE_SIZE = 1000
@@ -514,10 +620,12 @@ if __name__ == "__main__":
     governance_assessment = results['governance_assessment']
 
     # --- Print Data Generation Info ---
-    print(f"\nPanel Data Generated: {N_STOCKS} stocks x {N_MONTHS} months = {len(df)} observations")
+    print(
+        f"\nPanel Data Generated: {N_STOCKS} stocks x {N_MONTHS} months = {len(df)} observations")
     print(f"Number of Features: {len(feature_cols)}")
     print(f"First 5 rows of the generated data:\n{df.head().to_string()}")
-    print(f"\nReturn distribution: mean={df['next_month_return'].mean():.4f}, std={df['next_month_return'].std():.4f}")
+    print(
+        f"\nReturn distribution: mean={df['next_month_return'].mean():.4f}, std={df['next_month_return'].std():.4f}")
 
     # --- Initial Model Checks (optional, for demonstration) ---
     # For illustration, we'll use a fixed split (first MIN_TRAIN_MONTHS-1 months for train, next one for test)
@@ -526,25 +634,32 @@ if __name__ == "__main__":
         test_check_data = df[df['month'] == MIN_TRAIN_MONTHS-1]
 
         if not train_check_data.empty and not test_check_data.empty and len(train_check_data) > 0 and len(test_check_data) > 0:
-            lin_pred_check, lin_model_check = linear_predict(train_check_data, test_check_data, feature_cols)
+            lin_pred_check, lin_model_check = linear_predict(
+                train_check_data, test_check_data, feature_cols)
             print("\nLinear Model Coefficients (In-Sample Check):")
             print("=" * 45)
             for f, c in zip(feature_cols, lin_model_check.coef_):
                 print(f" {f:<22s}: {c:+.6f}")
 
-            ml_pred_check, _ = ml_predict(train_check_data, test_check_data, feature_cols)
-            print(f"\nML Model (XGBoost) Prediction Sample (first 5): {ml_pred_check[:5]}")
+            ml_pred_check, _ = ml_predict(
+                train_check_data, test_check_data, feature_cols)
+            print(
+                f"\nML Model (XGBoost) Prediction Sample (first 5): {ml_pred_check[:5]}")
         else:
-            print(f"\nSkipping initial model checks: Not enough data for a meaningful split for demonstration (need at least {MIN_TRAIN_MONTHS} months).")
+            print(
+                f"\nSkipping initial model checks: Not enough data for a meaningful split for demonstration (need at least {MIN_TRAIN_MONTHS} months).")
 
     # --- Print Backtest Results Summaries ---
     print(f"\nLinear (OLS) Strategy: {len(linear_results)} months of backtest results generated." if not linear_results.empty else "\nLinear (OLS) Strategy: No backtest results generated.")
     if not linear_results.empty:
-        print(f"Mean L/S Return (OLS): {linear_results['ls_return'].mean()*100:.2f}%/month")
+        print(
+            f"Mean L/S Return (OLS): {linear_results['ls_return'].mean()*100:.2f}%/month")
 
-    print(f"\nML (XGBoost) Strategy: {len(ml_results)} months of backtest results generated." if not ml_results.empty else "\nML (XGBoost) Strategy: No backtest results generated.")
+    print(
+        f"\nML (XGBoost) Strategy: {len(ml_results)} months of backtest results generated." if not ml_results.empty else "\nML (XGBoost) Strategy: No backtest results generated.")
     if not ml_results.empty:
-        print(f"Mean L/S Return (XGBoost): {ml_results['ls_return'].mean()*100:.2f}%/month")
+        print(
+            f"Mean L/S Return (XGBoost): {ml_results['ls_return'].mean()*100:.2f}%/month")
 
     print("\nSample of Long-Short Returns (first 5 months of ML strategy):")
     if not ml_results.empty:
@@ -580,10 +695,14 @@ if __name__ == "__main__":
     print("\nGOVERNANCE ASSESSMENT")
     print("=" * 60)
     gov_results = governance_assessment
-    print(f"Linear (OLS) Sharpe Ratio: {gov_results['lin_sharpe']:.2f}" if pd.notna(gov_results['lin_sharpe']) else "N/A")
-    print(f"ML (XGBoost) Sharpe Ratio: {gov_results['ml_sharpe']:.2f}" if pd.notna(gov_results['ml_sharpe']) else "N/A")
-    print(f"Sharpe Lift (ML vs. Linear): {gov_results['sharpe_lift']:+.2f}" if pd.notna(gov_results['sharpe_lift']) else "N/A")
-    print(f"Relative Sharpe Lift: {gov_results['relative_sharpe_lift']:+.0f}%" if pd.notna(gov_results['relative_sharpe_lift']) else "N/A")
+    print(f"Linear (OLS) Sharpe Ratio: {gov_results['lin_sharpe']:.2f}" if pd.notna(
+        gov_results['lin_sharpe']) else "N/A")
+    print(f"ML (XGBoost) Sharpe Ratio: {gov_results['ml_sharpe']:.2f}" if pd.notna(
+        gov_results['ml_sharpe']) else "N/A")
+    print(f"Sharpe Lift (ML vs. Linear): {gov_results['sharpe_lift']:+.2f}" if pd.notna(
+        gov_results['sharpe_lift']) else "N/A")
+    print(f"Relative Sharpe Lift: {gov_results['relative_sharpe_lift']:+.0f}%" if pd.notna(
+        gov_results['relative_sharpe_lift']) else "N/A")
     print(f"\nVERDICT: {gov_results['verdict']}")
 
     print("\n--- Practitioner Warning ---")
