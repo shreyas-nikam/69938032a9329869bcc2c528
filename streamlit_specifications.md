@@ -1,5 +1,4 @@
 
-```python
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -564,4 +563,3 @@ st.markdown(f"**Practitioner Warning**")
 st.markdown(f"Simulated data typically overstates ML's advantage because nonlinear interactions are embedded.")
 st.markdown(f"Real-world Sharpe lifts are often in the 0.1-0.3 range and come with hidden costs like higher turnover.")
 st.markdown(f"Always validate on out-of-sample real data before drawing deployment conclusions.")
-```
